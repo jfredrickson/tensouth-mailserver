@@ -1,0 +1,62 @@
+version: "3.8"
+
+volumes:
+  mail_data:
+  mail_state:
+  mail_logs:
+  mail_config:
+
+networks:
+  reverse-proxy:
+    name: reverse-proxy
+    external: true
+
+services:
+  mail:
+    image: docker.io/mailserver/docker-mailserver:latest
+    # If the FQDN for your mail-server is only two labels (eg: example.com),
+    # you can assign this entirely to `hostname` and remove `domainname`.
+    hostname: mail
+    domainname: ${DOMAIN}
+    env_file:
+      - mailserver.env
+      - .env
+    # More information about the mail-server ports:
+    # https://docker-mailserver.github.io/docker-mailserver/edge/config/security/understanding-the-ports/
+    # To avoid conflicts with yaml base-60 float, DO NOT remove the quotation marks.
+    ports:
+      - "${EXTERNAL_IP}:25:25"    # SMTP  (explicit TLS => STARTTLS)
+      - "${EXTERNAL_IP}:143:143"  # IMAP4 (explicit TLS => STARTTLS)
+      - "${EXTERNAL_IP}:465:465"  # ESMTP (implicit TLS)
+      - "${EXTERNAL_IP}:587:587"  # ESMTP (explicit TLS => STARTTLS)
+      - "${EXTERNAL_IP}:993:993"  # IMAP4 (implicit TLS)
+    volumes:
+      - mail_data:/var/mail/
+      - mail_state:/var/mail-state/
+      - mail_logs:/var/log/mail/
+      - mail_config:/tmp/docker-mailserver/
+      - /etc/localtime:/etc/localtime:ro
+      - /srv/webapps/proxy/traefik/acme.json:/etc/letsencrypt/acme.json:ro
+    restart: always
+    stop_grace_period: 1m
+    cap_add:
+      - NET_ADMIN
+      - SYS_PTRACE
+    healthcheck:
+      test: "ss --listening --tcp | grep -P 'LISTEN.+:smtp' || exit 1"
+      timeout: 3s
+      retries: 0
+
+  # Dummy web app just to get Traefik to obtain a certificate
+  whoami:
+    image: docker.io/traefik/whoami:latest
+    networks:
+      - reverse-proxy
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=reverse-proxy
+      - traefik.http.routers.whoami.entrypoints=websecure
+      - traefik.http.routers.whoami.tls=true
+      - traefik.http.routers.whoami.tls.certResolver=letsencrypt
+      - traefik.http.routers.whoami.rule=Host(`mail.${DOMAIN}`)
+
