@@ -1,5 +1,3 @@
-version: "3.8"
-
 volumes:
   mail_data:
   mail_state:
